@@ -1,356 +1,354 @@
-#include <mqueue.h>
-#include <string.h>
 #include <stdio.h>
+#include <netdb.h>
+#include <strings.h>
+#include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include "common.h"
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include "lines.h"
+
+#define MAX_LENGTH_NOMBRE_OPERACION 16
+#define MAX_LENGTH_VALOR1 255
+#define MAX_LENGTH_INT 11
+#define MAX_LENGTH_DOUBLE 20
 
 int init(void) {
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
-    struct mensaje msg;     /* petición/mensaje */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
-
-    /* se rellena la petición */
-    strcpy(msg.operacion, "init");
-    strcpy(msg.q_name, queuename);
-    printf("Nombre cola: %s\n", msg.q_name);
-    printf("Enviando petición init a servidor\n");
-    printf("%s\n", msg.operacion);
-
-
-    /* se envía la petición al servidor */
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
         return -1;
     }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
-        return -1;
-    }
-    printf("Recibida respuesta de servidor");
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "init");
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+    close (sd);
+    return(atoi(resultado));
+
 }
 
 int set_value(int key, char *value1, int value2, double value3){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
-
-    struct mensaje msg;     /* petición/mensaje */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
-
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
-
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
-        return -1;
-    }
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key_str[MAX_LENGTH_INT];
+    char valor1_str[MAX_LENGTH_VALOR1];
+    char valor2_str[MAX_LENGTH_INT];
+    char valor3_str[MAX_LENGTH_DOUBLE];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
 
-    /* se rellena la petición */
-    strcpy(msg.operacion, "set_value");
-    strcpy(msg.q_name, queuename);
-    msg.key = key;
-    strcpy(msg.value1, value1);
-    msg.value2 = value2;
-    msg.value3 = value3;
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
-        return -1;
-    }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
+        return -1;
+    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status; 
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
+
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "set_value");
+    sprintf(key_str, "%d", key);
+    strcpy(valor1_str, value1);
+    sprintf(valor2_str, "%d", value2);
+    sprintf(valor3_str, "%f", value3);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key_str, strlen(key_str)+1); // envía la key
+    sendMessage(sd, valor1_str, strlen(valor1_str)+1); // envía el valor1
+    sendMessage(sd, valor2_str, strlen(valor2_str)+1); // envía el valor2
+    sendMessage(sd, valor3_str, strlen(valor3_str)+1); // envía el valor3
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+    close (sd);
+    return(atoi(resultado));
 }
 
 int get_value(int key, char *value1, int *value2, double *value3){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
-
-    struct mensaje msg;     /* petición/mensaje */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
-
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
-
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
-        return -1;
-    }
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key_str[MAX_LENGTH_INT];
+    char valor1_str[MAX_LENGTH_VALOR1];
+    char valor2_str[MAX_LENGTH_INT];
+    char valor3_str[MAX_LENGTH_DOUBLE];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
 
-    /* se rellena la petición */
-    strcpy(msg.operacion, "get_value");
-    strcpy(msg.q_name, queuename);
-    msg.key = key;
-   
-    
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
-        return -1;
-    }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
-    // Copiamos los valores de la respuesta en los punteros
-    strcpy(value1, resultado.value1);
-    *value2 = resultado.value2;
-    *value3 = resultado.value3;
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
+        return -1;
+    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
-   
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "get_value");
+    sprintf(key_str, "%d", key);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key_str, strlen(key_str)+1); // envía la key
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+    readLine(sd, valor1_str, MAX_LENGTH_VALOR1); // recibe el valor1
+    strcpy(value1, valor1_str);
+    readLine(sd, valor2_str, MAX_LENGTH_INT); // recibe el valor2
+    readLine(sd, valor3_str, MAX_LENGTH_DOUBLE); // recibe el valor3
+    *value2 = atoi(valor2_str); // convierte el valor2 a int
+    *value3 = atof(valor3_str); // convierte el valor3 a double
+
+    close (sd);
+    return(atoi(resultado));
 }
 
 int modify_value(int key, char *value1, int value2, double value3){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
-
-    struct mensaje msg;     /* petición */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
-
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
-
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
-        return -1;
-    }
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key_str[MAX_LENGTH_INT];
+    char valor1_str[MAX_LENGTH_VALOR1];
+    char valor2_str[MAX_LENGTH_INT];
+    char valor3_str[MAX_LENGTH_DOUBLE];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
 
-    /* se rellena la petición */
-    strcpy(msg.operacion, "modify_value");
-    strcpy(msg.q_name, queuename);
-    msg.key = key;
-    strcpy(msg.value1, value1);
-    msg.value2 = value2;
-    msg.value3 = value3;
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
-        return -1;
-    }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
+        return -1;
+    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
+
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "modify_value");
+    sprintf(key_str, "%d", key);
+    strcpy(valor1_str, value1);
+    sprintf(valor2_str, "%d", value2);
+    sprintf(valor3_str, "%f", value3);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key_str, strlen(key_str)+1); // envía la key
+    sendMessage(sd, valor1_str, strlen(valor1_str)+1); // envía el valor1
+    sendMessage(sd, valor2_str, strlen(valor2_str)+1); // envía el valor2
+    sendMessage(sd, valor3_str, strlen(valor3_str)+1); // envía el valor3
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+    close (sd);
+    return(atoi(resultado));
 }
 
 int delete_key(int key){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key_str[MAX_LENGTH_INT];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
-    struct mensaje msg;     /* petición */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
 
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
-
-    /* se rellena la petición */
-    strcpy(msg.operacion, "delete_key");
-    strcpy(msg.q_name, queuename);
-    msg.key = key;
-
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
         return -1;
     }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
-        return -1;
-    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "delete_key");
+    sprintf(key_str, "%d", key);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key_str, strlen(key_str)+1); // envía la key
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+
+    close (sd);
+    return(atoi(resultado));
 }
 
 int exist(int key){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key_str[MAX_LENGTH_INT];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
-    struct mensaje msg;     /* petición */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
 
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
-
-    /* se rellena la petición */
-    strcpy(msg.operacion, "exist");
-    strcpy(msg.q_name, queuename);
-    msg.key = key;
-
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
         return -1;
     }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
-        return -1;
-    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
 
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "exist");
+    sprintf(key_str, "%d", key);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key_str, strlen(key_str)+1); // envía la key
+
+    readLine(sd, resultado, 2); // recibe la respuesta
+
+    close (sd);
+    return(atoi(resultado));
 }
 
 int copy_key( int key1, int key2){
-    mqd_t q_servidor;       /* cola de mensajes del proceso servidor */
-    mqd_t q_cliente;        /* cola de mensajes para el proceso cliente */
+    char resultado[2]; // 0 o 1 + '\0' = 2
+    char operacion[MAX_LENGTH_NOMBRE_OPERACION];
+    char key1_str[MAX_LENGTH_INT];
+    char key2_str[MAX_LENGTH_INT];
+    int sd; // descriptor del socket
+    struct sockaddr_in server_addr; // se define la estructura para la dirección del servidor
+    struct hostent *hp;
+    char *hostname;
 
-    struct mensaje msg;     /* petición */
-    struct respuesta resultado; /* respuesta */
-    struct mq_attr attr;
-    char queuename[MAX_LENGTH_VALOR1];
 
-    attr.mq_maxmsg = 1;
-    attr.mq_msgsize = sizeof(struct respuesta);
+    sd = socket(AF_INET, SOCK_STREAM, 0); // se crea el socket
+    bzero((char *)&server_addr, sizeof(server_addr)); // se rellena de 0's
 
-    sprintf(queuename,  "/Cola.2-%d", getpid());
-    q_cliente = mq_open(queuename, O_CREAT|O_RDONLY, 0700, &attr);
-    if (q_cliente == -1) {
-        perror("mq_open 1");
-        return -1;
-    }
-    q_servidor = mq_open("/SERVIDOR.2", O_WRONLY);
-    if (q_servidor == -1){
-        mq_close(q_cliente);
-        perror("mq_open 2");
+    hostname = getenv("IP_TUPLAS"); // se obtiene la dirección del servidor desde la variable de entorno IP_TUPLAS
+    hp = gethostbyname(hostname);
+    if (hp == NULL){
+        printf("Variable de entorno IP_TUPLAS no definida\n");
         return -1;
     }
 
-
-    /* se rellena la petición */
-    strcpy(msg.operacion, "copy_key");
-    strcpy(msg.q_name, queuename);
-    msg.key = key1;
-    msg.key2 = key2;
-
-
-    if (mq_send(q_servidor, (const char *)&msg, sizeof(struct mensaje), 0) < 0){
-        perror("mq_send");
+    char* puerto_str = getenv("PORT_TUPLAS"); // se obtiene el puerto del servidor desde la variable de entorno PORT_TUPLAS
+    if (puerto_str == NULL){
+        printf("Variable de entorno PORT_TUPLAS no definida\n");
         return -1;
     }
-    if (mq_receive(q_cliente, (char *) &resultado, sizeof(struct respuesta), 0) < 0){
-        perror("mq_recv");
-        return -1;
-    }
+    int puerto = atoi(puerto_str); // se convierte el puerto a int
+
+    memcpy (&(server_addr.sin_addr), hp->h_addr, hp->h_length); // se copia la dirección del servidor
+    server_addr.sin_family = AF_INET; // se indica que es una dirección de internet
+    server_addr.sin_port = htons(puerto); // se indica el puerto del servidor (se convierte a formato de red)
+
+    // se establece la conexión
+    connect(sd, (struct sockaddr *) &server_addr,sizeof(server_addr));
+
+    strcpy(operacion, "copy_key");
+    sprintf(key1_str, "%d", key1);
+    sprintf(key2_str, "%d", key2);
+    sendMessage(sd, operacion, strlen(operacion)+1); // envía la operacion
+    sendMessage(sd, key1_str, strlen(key1_str)+1); // envía la key1
+    sendMessage(sd, key2_str, strlen(key2_str)+1); // envía la key2
 
 
-    mq_close(q_servidor);
-    mq_close(q_cliente);
-    mq_unlink(queuename);
-    return resultado.status;
+    readLine(sd, resultado, 2); // recibe la respuesta
+
+    close (sd);
+    return(atoi(resultado));
 }
-

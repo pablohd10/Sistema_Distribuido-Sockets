@@ -1,0 +1,1 @@
+AL RECIBIR UN MENSAJE --> no utilizar receive (espera un numero fijo de bytes) utilizar readline!!!!!
